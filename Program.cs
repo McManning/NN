@@ -457,6 +457,9 @@ namespace NN
                     classifications.Add(sample.classification);
                 }
             }
+
+            // Ensure that classifications are always in the same order
+            classifications.Sort();
         }
 
         public Sample[] GetTrainingSamples()
@@ -759,6 +762,85 @@ namespace NN
             return errorList.ToArray();
         }
 
+        /// <summary>
+        /// Get the predicted class index given a hypothesis vector (output node values)
+        /// </summary>
+        /// <param name="hypothesis"></param>
+        /// <returns></returns>
+        private int GetPredictedClassIndex(float[] hypothesis)
+        {
+            int bestIndex = 0;
+            for (int i = 0; i < hypothesis.Length; i++)
+            {
+                if (hypothesis[i] > hypothesis[bestIndex])
+                {
+                    bestIndex = i;
+                }
+            }
+
+            return bestIndex;
+        }
+        
+        /// <summary>
+        /// Run the given test samples through the previously trained NN
+        /// and dumps a Weka-style confusion matrix and some statistical results
+        /// </summary>
+        /// <param name="samples"></param>
+        public void Test(Sample[] samples)
+        {
+            RecordClassifications(samples);
+            int n = classifications.Count;
+            float accuracy = 0;
+
+            // Confusion matrix of values
+            var confusion = new float[n, n];
+
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++)
+                {
+                    confusion[x, y] = 0;
+                }
+            }
+
+            foreach (var sample in samples)
+            {
+                var hypothesis = FeedForward(sample);
+                var predicted = GetPredictedClassIndex(hypothesis);
+                var actual = classifications.FindIndex(x => x == sample.classification);
+
+                if (predicted == actual)
+                {
+                    accuracy++;
+                }
+
+                confusion[predicted, actual]++;
+            }
+
+            // Confusion matrix header of codes per class (weka-style)
+            string alpha = "abcdefghijklmnopqrstuvwxyz";
+            int padding = samples.Length.ToString().Length + 1;
+
+            for (int x = 0; x < n; x++)
+            {
+                Console.Write(alpha[x].ToString().PadLeft(padding));
+            }
+            Console.WriteLine("   <-- classified as");
+
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++)
+                {
+                    Console.Write(confusion[x, y].ToString().PadLeft(padding));
+                }
+
+                // End of line class name
+                Console.WriteLine(" | " + alpha[y] + " = " + classifications[y]);
+            }
+
+            Console.WriteLine("Accuracy: " + (accuracy / samples.Length * 100.0f).ToString("0.0000") + "%");
+        }
+        
         /* public void FastNN(Sample[] samples)
          {
              Matrix<double> w1 = Matrix<double>.Build.Random(3, 3);
@@ -949,7 +1031,7 @@ namespace NN
                 network = new NeuralNetwork(4, 3)
                 {
                     trainingRate = 0.3f,
-                    momentum = 0.9f,
+                    momentum = 0.2f,
                     epoch = 60000,
                     errorThreshold = 0.01f,
                     minibatchSize = 3
@@ -957,6 +1039,7 @@ namespace NN
 
                 // var samples = network.GetEasierTrainingSamples();
                 // var samples = network.GetTrainingSamples();
+                // var samples = LoadSamplesFromCSV("iris-two-class-normalized.csv");
                 var samples = LoadSamplesFromCSV("iris-normalized.csv");
 
                 error[i] = network.Train(
@@ -964,6 +1047,8 @@ namespace NN
                     network.StochasticGradientDescent,
                     Utility.MeanSignedDeviation
                 );
+
+                network.Test(samples);
             }
 
             WriteIterationGroup(network, error);
