@@ -690,42 +690,6 @@ namespace NN
             
             return totalError / samples.Length;
         }
-
-        public float MinibatchGradientDescent(Sample[] samples)
-        {
-            float SSE = 0;
-            
-            Utility.Shuffle(samples);
-
-            int offset = 0;
-            while (offset < samples.Length)
-            {
-                int batchMaxIndex = Math.Min(samples.Length, offset + minibatchSize);
-
-                // Aggregate error terms for samples in this batch
-                float error = 0;
-                for (int s = offset; s < batchMaxIndex; s++)
-                {
-                    var actual = VectorizeClassification(samples[s].classification);
-                    var hypothesis = FeedForward(samples[s]);
-
-                    // error += hypothesis - actual;
-                    error += Utility.EuclideanDistance(hypothesis, actual);
-                }
-
-                error /= (batchMaxIndex - offset);
-
-                SSE += (float)Math.Pow(error, 2);
-
-                // Backprop the aggregated error
-                // BackPropagate(samples[s]);
-
-                offset += minibatchSize;
-            }
-            
-            // MSE is SSE over the number of batches we ran
-            return SSE / (samples.Length / minibatchSize);
-        }
         
         public float[] Train(
             Sample[] samples,
