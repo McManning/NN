@@ -208,6 +208,24 @@ namespace NN
 
             return sum;
         }
+
+        /// <summary>
+        /// Simple difference, using only the first index of both vectors
+        /// 
+        /// predicted - actual, obv
+        /// </summary>
+        /// <param name="predicted"></param>
+        /// <param name="actual"></param>
+        /// <returns></returns>
+        public static float SimpleDifferenceError(float[] predicted, float[] actual)
+        {
+            return predicted[0] - actual[0];
+        }
+
+        public static string VecToString(float[] vec)
+        {
+            return '[' + string.Join(",", vec) + ']';
+        }
     }
 
     class Node
@@ -537,9 +555,8 @@ namespace NN
             return layers.Last().Output;
         }
 
-        private float BackPropagate(float hypothesisError)
+        private void BackPropagate(float hypothesisError)
         {
-            float error = 0;
             float weightDelta = 0;
             float biasDelta = 0;
 
@@ -555,10 +572,6 @@ namespace NN
                     {
                         // Console.WriteLine("-- Output " + hypothesis + " vs " + actual);
                         node.delta = hypothesisError;
-
-                        // Aggregate a sum of square error for the node
-                        // error += (float)Math.Pow(node.delta, 2.0);
-
                         node.delta *= Utility.SigmoidDerivative(node.input);
                     }
                 }
@@ -620,8 +633,6 @@ namespace NN
             //                      OR
             //                  ElementWiseMultiply(activations[layer], (1 - activations[layer]))
             //              )
-
-            return error;
         }
 
         /// <summary>
@@ -630,29 +641,35 @@ namespace NN
         /// </summary>
         /// <param name="samples"></param>
         /// <param name="errorAlgorithm"></param>
-        /// <returns>Mean square error</returns>
+        /// <returns>Average error over the samples</returns>
         public float StochasticGradientDescent(Sample[] samples, ErrorFunc errorAlgorithm)
         {
-            float SSE = 0;
+            float averageError = 0;
             
             Utility.Shuffle(samples);
 
             foreach (var sample in samples)
             {
                 // Feed forward through the network 
-                var actual = VectorizeClassification(sample.classification);
+                var actual = new float[] { float.Parse(sample.classification) }; //  VectorizeClassification(sample.classification);
                 var hypothesis = FeedForward(sample);
+
+                // Console.WriteLine("---Sample");
+                // Console.WriteLine(Utility.VecToString(hypothesis));
+                // Console.WriteLine(Utility.VecToString(actual));
 
                 // Determine an error value for backprop
                 // float error = hypothesis - actual;
-                float error = errorAlgorithm(actual, hypothesis);
-                SSE += (float)Math.Pow(error, 2);
+                float error = errorAlgorithm(hypothesis, actual);
+                averageError += (float)Math.Pow(error, 2);
+
+                // Console.WriteLine("Error " + error);
 
                 // Backprop the error to update weights/biases
                 BackPropagate(error);
             }
             
-            return SSE / samples.Length;
+            return averageError / samples.Length;
         }
 
         public float MinibatchGradientDescent(Sample[] samples)
@@ -690,41 +707,40 @@ namespace NN
             // MSE is SSE over the number of batches we ran
             return SSE / (samples.Length / minibatchSize);
         }
-
-
+        
         public float[] Train(
             Sample[] samples,
             OptimizeFunc optimizeFunc,
             ErrorFunc errorFunc
         ) {
-            // Mean square error for each iteration 
-            List<float> MSE = new List<float>();
+            // Error recorded for each iteration
+            List<float> errorList = new List<float>();
             
             RecordClassifications(samples);
 
             // Iterate over the epoch, running the desired optimization algorithm for each iteration
-            float mse = 1.0f;
+            float error = 1.0f;
             int iteration;
-            for (iteration = 0; iteration < epoch && mse > errorThreshold; iteration++)
+            for (iteration = 0; iteration < epoch && error > errorThreshold; iteration++)
             {
-                mse = optimizeFunc(samples, errorFunc);
-                MSE.Add(mse);
+                error = optimizeFunc(samples, errorFunc);
+                errorList.Add(error);
             }
 
             if (iteration == epoch)
             {
                 Console.WriteLine(
-                    "Gave up after " + iteration + " iterations. MSE: " + MSE.Last().ToString("0.00000")
+                    "Gave up after " + iteration + " iterations. Error: " + errorList.Last().ToString("0.00000")
                 );
             }
             else
             {
                 Console.WriteLine(
-                    "Hit threshold of " + MSE.Last().ToString("0.00000") + " at " + iteration + "th iteration"
+                    "Hit threshold of " + errorList.Last().ToString("0.00000") + " at " + iteration + "th iteration"
                 );
             }
 
-            return MSE.ToArray();
+            return errorList.ToArray();
         }
 
         /* public void FastNN(Sample[] samples)
@@ -837,7 +853,7 @@ namespace NN
             return samples.ToArray();
         }
 
-        static void WriteIterationLog(float[] mse, int iterations)
+        static void WriteIterationLog(float[] error, int iterations)
         {
             using (FileStream fs = File.Create(@"iterations-" + iterations + ".csv"))
             {
@@ -846,18 +862,18 @@ namespace NN
                     writer.WriteLine("Iteration,MSE");
                     for (int i = 0; i < iterations; i++)
                     {
-                        writer.WriteLine(i + "," + mse[i]);
+                        writer.WriteLine(i + "," + error[i]);
                     }
                 }
             }
         }
 
-        static void WriteIterationGroup(NeuralNetwork network, float[][] mse)
+        static void WriteIterationGroup(NeuralNetwork network, float[][] error)
         {
             int maxIterations = 0;
-            for (int run = 0; run < mse.Length; run++)
+            for (int run = 0; run < error.Length; run++)
             {
-                maxIterations = Math.Max(maxIterations, mse[run].Length);
+                maxIterations = Math.Max(maxIterations, error[run].Length);
             }
 
             using (FileStream fs = File.Create(@"iteration-group.csv"))
@@ -874,7 +890,7 @@ namespace NN
                     );
 
                     // Column headers
-                    for (int run = 0; run < mse.Length; run++)
+                    for (int run = 0; run < error.Length; run++)
                     {
                         writer.Write("R" + run + ",");
                     }
@@ -884,15 +900,15 @@ namespace NN
                     // Column data
                     for (int iter = 0; iter < maxIterations; iter++)
                     {
-                        for (int run = 0; run < mse.Length; run++)
+                        for (int run = 0; run < error.Length; run++)
                         {
-                            if (mse[run].Length <= iter)
+                            if (error[run].Length <= iter)
                             {
                                 writer.Write(",");
                             }
                             else
                             {
-                                writer.Write(mse[run][iter] + ",");
+                                writer.Write(error[run][iter] + ",");
                             }
                         }
 
@@ -904,20 +920,20 @@ namespace NN
         
         static void Main(string[] args)
         {
-            int runs = 20;
+            int runs = 5;
 
-            float[][] mse = new float[runs][];
+            float[][] error = new float[runs][];
 
             NeuralNetwork network = null;
             for (int i = 0; i < runs; i++)
             {
                 // Need to reinitialize network & samples, otherwise
                 // we have old network settings
-                network = new NeuralNetwork(4, 2)
+                network = new NeuralNetwork(4, 1)
                 {
                     trainingRate = 0.3f,
                     momentum = 0.2f,
-                    epoch = 5000,
+                    epoch = 1000,
                     errorThreshold = 0.01f,
                     minibatchSize = 3
                 };
@@ -926,14 +942,14 @@ namespace NN
                 // var samples = network.GetTrainingSamples();
                 var samples = LoadSamplesFromCSV("iris-two-class-normalized.csv");
 
-                mse[i] = network.Train(
+                error[i] = network.Train(
                     samples, 
                     network.StochasticGradientDescent,
-                    Utility.MeanSquaredError
+                    Utility.SimpleDifferenceError
                 );
             }
 
-            WriteIterationGroup(network, mse);
+            WriteIterationGroup(network, error);
 
             Console.ReadLine();
         }
