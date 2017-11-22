@@ -584,15 +584,21 @@ namespace NN
                     for (int i = 0; i < layer.nodes.Length; i++)
                     {
                         Node node = layer.nodes[i];
-                        float actual = 0;
 
+                        // Convert the classification to either 1 (output node is for the same class)
+                        // or 0 (output node is for a different class). 
+                        // I use [0.1, 0.9] to try to quicken optimization (LeCun, et al. Efficient BackProp 1998)
+                        float actual = 0.1f;
                         if (sample.classification == classifications[i])
                         {
-                            actual = 1.0f;
+                            actual = 0.9f;
                         }
 
+                        // Reported overall error will be (1/2)*sum((actual - hypothesis)^2)
                         error += (float)Math.Pow(actual - node.output, 2);
-                        
+
+                        // Set the delta to the derivative of the error (hypothesis - actual)
+                        //  * derivative of the aggregate inputs
                         node.delta = (node.output - actual) * Utility.SigmoidDerivative(node.input);
                     }
                 }
