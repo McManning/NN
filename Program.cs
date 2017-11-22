@@ -16,32 +16,122 @@ namespace NN
     // Signatures for plugin function types
     // Kinda a hacky C# version of typeof, I guess
     using ErrorFunc = Func<float[], float[], float>;
-    using OptimizeFunc = Func<Sample[], Func<float[], float[], float>, float>;
+    using OptimizeFunc = Func<Sample[], float>;
     using ActivatorFunc = Func<float, float>;
+
+    /// <summary>
+    /// Interface for an activation function of a node
+    /// </summary>
+    interface IActivationFunction
+    {
+        float F(float x);
+        float FPrime(float x); 
+    }
+
+    class IdentityActivation : IActivationFunction
+    {
+        public float F(float x)
+        {
+            return x;
+        }
+
+        public float FPrime(float x)
+        {
+            return 1.0f;
+        }
+    }
+
+    class LogisticActivation : IActivationFunction
+    {
+        public float F(float x)
+        {
+            return 1.0f / (1.0f + (float)Math.Exp(-x));
+        }
+
+        public float FPrime(float x)
+        {
+            return F(x) * (1.0f - F(x));
+        }
+    }
+
+    class TanHActivation : IActivationFunction
+    {
+        public float F(float x)
+        {
+            return 2.0f / (1.0f + (float)Math.Exp(-2.0f * x)) - 1.0f;
+        }
+
+        public float FPrime(float x)
+        {
+            float e = F(x);
+            return 1.0f - e * e;
+        }
+    }
+
+    class SoftPlusActivation : IActivationFunction
+    {
+        public float F(float x)
+        {
+            return (float)Math.Log(1.0f + Math.Exp(x));
+        }
+
+        public float FPrime(float x)
+        {
+            return 1.0f / (1.0f + (float)Math.Exp(-x));
+        }
+    }
+
+    /// <summary>
+    /// Variation of the hyperbolic tangent activation function
+    /// (LeCun, et al. 1998 "Efficient BackProp")
+    /// </summary>
+    class LeCunTanHActivation : IActivationFunction
+    {
+        public float F(float x)
+        {
+            return 1.7159f * (float)Math.Tanh(2.0f / 3.0f * x);
+        }
+
+        public float FPrime(float x)
+        {
+            float e = (float)(Math.Exp(-2.0f * x / 3.0f) + Math.Exp(2.0f * x / 3.0f));
+            return 4.5757f / (e * e);
+        }
+    }
+
+    /// <summary>
+    /// Exponential linear unit activator - with a fixed alpha (for now)
+    /// (Clevert, et al. 2015 "Fast and Accurate Deep Network Learning by Exponential Linear Units (ELUs)")
+    /// </summary>
+    class ELUActivation : IActivationFunction
+    {
+        const float ALPHA = 0.03f;
+
+        public float F(float x)
+        {
+            if (x < 0)
+            {
+                return ALPHA * ((float)Math.Exp(x) - 1.0f);
+            }
+
+            return x;
+        }
+
+        public float FPrime(float x)
+        {
+            if (x < 0)
+            {
+                return F(x) + ALPHA;
+            }
+
+            return 1;
+        }
+    }
 
     class Utility
     {
         private static Random random = new System.Random();
-
-        public static float Sigmoid(float x)
-        {
-            // Hyberbolic tangent variation (LeCun, et al. Efficient BackProp 1998)
-            //return 1.7159f * (float)Math.Tanh(2.0f / 3.0f * x);
-            
-            // Logistic sigmoid
-            return 1.0f / (1.0f + (float)Math.Exp(-x));
-        }
-
-        public static float SigmoidDerivative(float x)
-        {
-            // Hyberbolic tangent variation (LeCun, et al. Efficient BackProp 1998)
-            //float e = (float)(Math.Exp(-2.0f * x / 3.0f) + Math.Exp(2.0f * x / 3.0f));
-            //return 4.5757f / (e * e);
-
-            // Logistic sigmoid
-            return Sigmoid(x) * (1.0f - Sigmoid(x));
-        }
-
+        
         public static void Shuffle<T>(IList<T> list)
         {
             int n = list.Count;
@@ -351,6 +441,8 @@ namespace NN
         public float momentum;
         public int epoch;
         public float errorThreshold;
+        public IActivationFunction activator;
+
         public int minibatchSize;
 
         private List<Layer> layers;
@@ -421,26 +513,6 @@ namespace NN
                     node.AddPrevious(prev);
                 }
             }
-        }
-
-        /// <summary>
-        /// Transform a nominal classification value to a binary vector
-        /// where the length of the vector is the number of different classifiers
-        /// in the system and it's filled with zeroes, except for the index that
-        /// corresponds with the input classification
-        /// </summary>
-        /// <param name="classification"></param>
-        /// <returns></returns>
-        public float[] VectorizeClassification(string classification)
-        {
-            float[] vec = new float[classifications.Count];
-
-            for (int i = 0; i < classifications.Count; i++)
-            {
-                vec[i] = classifications[i] == classification ? 1.0f : 0;
-            }
-
-            return vec;
         }
 
         /// <summary>
@@ -557,7 +629,7 @@ namespace NN
                     node.input += node.bias;
 
                     // Output is the activation function of the input
-                    node.output = Utility.Sigmoid(node.input);
+                    node.output = activator.F(node.input);
                 }
 
                 previousLayer = layer;
@@ -587,8 +659,8 @@ namespace NN
 
                         // Convert the classification to either 1 (output node is for the same class)
                         // or 0 (output node is for a different class). 
-                        // I use [0.1, 0.9] to try to quicken optimization (LeCun, et al. Efficient BackProp 1998)
-                        float actual = 0.1f;
+                        // I use [0.1, 0.9] to try to quicken optimization (LeCun, et al. 1998 "Efficient BackProp")
+                        float actual = 0.1f; // -0.9f;
                         if (sample.classification == classifications[i])
                         {
                             actual = 0.9f;
@@ -599,7 +671,7 @@ namespace NN
 
                         // Set the delta to the derivative of the error (hypothesis - actual)
                         //  * derivative of the aggregate inputs
-                        node.delta = (node.output - actual) * Utility.SigmoidDerivative(node.input);
+                        node.delta = (node.output - actual) * activator.FPrime(node.input);
                     }
                 }
                 else
@@ -611,7 +683,7 @@ namespace NN
                         float sum = 0;
                         foreach (var forwardNode in forwardLayer.nodes)
                         {
-                            sum += forwardNode.delta * Utility.SigmoidDerivative(node.input) * forwardNode.weights[node];
+                            sum += forwardNode.delta * activator.FPrime(node.input) * forwardNode.weights[node];
                         }
 
                         node.delta = sum;
@@ -668,9 +740,8 @@ namespace NN
         /// (back propagating an error per distinct sample trained with)
         /// </summary>
         /// <param name="samples"></param>
-        /// <param name="errorAlgorithm"></param>
-        /// <returns>Mean error over the samples</returns>
-        public float StochasticGradientDescent(Sample[] samples, ErrorFunc errorAlgorithm)
+        /// <returns>Mean SSE error over the samples</returns>
+        public float StochasticGradientDescent(Sample[] samples)
         {
             float totalError = 0;
             
@@ -679,17 +750,9 @@ namespace NN
             foreach (var sample in samples)
             {
                 // Feed forward through the network 
-                // var actual = new float[] { float.Parse(sample.classification) };
-                // var actual = VectorizeClassification(sample.classification);
-                var hypothesis = FeedForward(sample);
-
-                // Determine an error value for backprop
-                // float error = hypothesis - actual;
-                // float error = errorAlgorithm(hypothesis, actual);
-                // Console.WriteLine("Error " + error);
+                FeedForward(sample);
                 
-                // Backprop the error to update weights/biases
-                // Our error is sum[i->#Outputs](hypothesis_i - actual_i)
+                // Backprop the error through the network
                 float error = BackPropagate(sample);
                 totalError += error;
             }
@@ -699,8 +762,7 @@ namespace NN
         
         public float[] Train(
             Sample[] samples,
-            OptimizeFunc optimizeFunc,
-            ErrorFunc errorFunc
+            OptimizeFunc optimizeFunc
         ) {
             // Error recorded for each iteration
             List<float> errorList = new List<float>();
@@ -712,7 +774,7 @@ namespace NN
             int iteration;
             for (iteration = 0; iteration < epoch && error > errorThreshold; iteration++)
             {
-                error = optimizeFunc(samples, errorFunc);
+                error = optimizeFunc(samples);
                 errorList.Add(error);
             }
 
@@ -1002,20 +1064,20 @@ namespace NN
                 {
                     trainingRate = 0.3f,
                     momentum = 0.2f,
-                    epoch = 60000,
-                    errorThreshold = 0.01f,
+                    epoch = 100,
+                    errorThreshold = 0.001f,
+                    activator = new LogisticActivation(),
                     minibatchSize = 3
                 };
 
                 // var samples = network.GetEasierTrainingSamples();
                 // var samples = network.GetTrainingSamples();
                 // var samples = LoadSamplesFromCSV("iris-two-class-normalized.csv");
-                var samples = LoadSamplesFromCSV("iris-normalized.csv");
+                var samples = LoadSamplesFromCSV("iris-normalized-mean-zero.csv");
 
                 error[i] = network.Train(
                     samples, 
-                    network.StochasticGradientDescent,
-                    Utility.MeanSignedDeviation
+                    network.StochasticGradientDescent
                 );
 
                 network.Test(samples);
