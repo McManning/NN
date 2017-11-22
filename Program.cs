@@ -25,11 +25,20 @@ namespace NN
 
         public static float Sigmoid(float x)
         {
+            // Hyberbolic tangent variation (LeCun, et al. Efficient BackProp 1998)
+            //return 1.7159f * (float)Math.Tanh(2.0f / 3.0f * x);
+            
+            // Logistic sigmoid
             return 1.0f / (1.0f + (float)Math.Exp(-x));
         }
 
         public static float SigmoidDerivative(float x)
         {
+            // Hyberbolic tangent variation (LeCun, et al. Efficient BackProp 1998)
+            //float e = (float)(Math.Exp(-2.0f * x / 3.0f) + Math.Exp(2.0f * x / 3.0f));
+            //return 4.5757f / (e * e);
+
+            // Logistic sigmoid
             return Sigmoid(x) * (1.0f - Sigmoid(x));
         }
 
@@ -541,8 +550,7 @@ namespace NN
                     {
                         node.input += prev.Value * prev.Key.output; // + node.bias;
                     }
-
-                    // TODO: Is bias *per layer* or per node?
+                    
                     node.input += node.bias;
 
                     // Output is the activation function of the input
@@ -555,10 +563,11 @@ namespace NN
             return layers.Last().Output;
         }
 
-        private void BackPropagate(float hypothesisError)
+        private float BackPropagate(Sample sample)
         {
             float weightDelta = 0;
             float biasDelta = 0;
+            float error = 0;
 
             // Back-propagate the error to update weights/biases
             Layer forwardLayer = null;
@@ -568,11 +577,20 @@ namespace NN
                 // to the input hypothesis error term (typically hypothesis - actual)
                 if (forwardLayer == null)
                 {
-                    foreach (var node in layer.nodes)
+                    // foreach (var node in layer.nodes)
+                    for (int i = 0; i < layer.nodes.Length; i++)
                     {
-                        // Console.WriteLine("-- Output " + hypothesis + " vs " + actual);
-                        node.delta = hypothesisError;
-                        node.delta *= Utility.SigmoidDerivative(node.input);
+                        Node node = layer.nodes[i];
+                        float actual = 0;
+
+                        if (sample.classification == classifications[i])
+                        {
+                            actual = 1.0f;
+                        }
+
+                        error += (float)Math.Pow(actual - node.output, 2);
+                        
+                        node.delta = (node.output - actual) * Utility.SigmoidDerivative(node.input);
                     }
                 }
                 else
@@ -584,9 +602,8 @@ namespace NN
                         float sum = 0;
                         foreach (var forwardNode in forwardLayer.nodes)
                         {
-                            sum += forwardNode.weights[node] * forwardNode.delta;
+                            sum += forwardNode.delta * Utility.SigmoidDerivative(node.input) * forwardNode.weights[node];
                         }
-                        sum *= Utility.SigmoidDerivative(node.input);
 
                         node.delta = sum;
                     }
@@ -606,7 +623,7 @@ namespace NN
                     {
                         weightDelta = trainingRate * node.delta * prevNode.output;
 
-                        // Factor in momentum to the weight
+                        // Factor in momentum to the weight to reduce oscillation
                         weightDelta += momentum * node.previousWeightDelta[prevNode];
                         node.previousWeightDelta[prevNode] = weightDelta;
 
@@ -633,6 +650,8 @@ namespace NN
             //                      OR
             //                  ElementWiseMultiply(activations[layer], (1 - activations[layer]))
             //              )
+
+            return error / 2;
         }
 
         /// <summary>
@@ -641,35 +660,32 @@ namespace NN
         /// </summary>
         /// <param name="samples"></param>
         /// <param name="errorAlgorithm"></param>
-        /// <returns>Average error over the samples</returns>
+        /// <returns>Mean error over the samples</returns>
         public float StochasticGradientDescent(Sample[] samples, ErrorFunc errorAlgorithm)
         {
-            float averageError = 0;
+            float totalError = 0;
             
             Utility.Shuffle(samples);
 
             foreach (var sample in samples)
             {
                 // Feed forward through the network 
-                var actual = new float[] { float.Parse(sample.classification) }; //  VectorizeClassification(sample.classification);
+                // var actual = new float[] { float.Parse(sample.classification) };
+                // var actual = VectorizeClassification(sample.classification);
                 var hypothesis = FeedForward(sample);
-
-                // Console.WriteLine("---Sample");
-                // Console.WriteLine(Utility.VecToString(hypothesis));
-                // Console.WriteLine(Utility.VecToString(actual));
 
                 // Determine an error value for backprop
                 // float error = hypothesis - actual;
-                float error = errorAlgorithm(hypothesis, actual);
-                averageError += (float)Math.Pow(error, 2);
-
+                // float error = errorAlgorithm(hypothesis, actual);
                 // Console.WriteLine("Error " + error);
-
+                
                 // Backprop the error to update weights/biases
-                BackPropagate(error);
+                // Our error is sum[i->#Outputs](hypothesis_i - actual_i)
+                float error = BackPropagate(sample);
+                totalError += error;
             }
             
-            return averageError / samples.Length;
+            return totalError / samples.Length;
         }
 
         public float MinibatchGradientDescent(Sample[] samples)
@@ -699,7 +715,7 @@ namespace NN
                 SSE += (float)Math.Pow(error, 2);
 
                 // Backprop the aggregated error
-                BackPropagate(error);
+                // BackPropagate(samples[s]);
 
                 offset += minibatchSize;
             }
@@ -889,6 +905,7 @@ namespace NN
                         " minibatch=" + network.minibatchSize 
                     );
 
+
                     // Column headers
                     for (int run = 0; run < error.Length; run++)
                     {
@@ -929,23 +946,23 @@ namespace NN
             {
                 // Need to reinitialize network & samples, otherwise
                 // we have old network settings
-                network = new NeuralNetwork(4, 1)
+                network = new NeuralNetwork(4, 3)
                 {
                     trainingRate = 0.3f,
-                    momentum = 0.2f,
-                    epoch = 1000,
+                    momentum = 0.9f,
+                    epoch = 60000,
                     errorThreshold = 0.01f,
                     minibatchSize = 3
                 };
 
                 // var samples = network.GetEasierTrainingSamples();
                 // var samples = network.GetTrainingSamples();
-                var samples = LoadSamplesFromCSV("iris-two-class-normalized.csv");
+                var samples = LoadSamplesFromCSV("iris-normalized.csv");
 
                 error[i] = network.Train(
                     samples, 
                     network.StochasticGradientDescent,
-                    Utility.SimpleDifferenceError
+                    Utility.MeanSignedDeviation
                 );
             }
 
