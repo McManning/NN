@@ -84,6 +84,10 @@ namespace NN
     /// <summary>
     /// Variation of the hyperbolic tangent activation function
     /// (LeCun, et al. 1998 "Efficient BackProp")
+    /// 
+    /// Note that this requires a few extra steps:
+    /// * Each activator output should be centered around 0
+    /// * The output nodes should be [-1, 1]
     /// </summary>
     class LeCunTanHActivation : IActivationFunction
     {
@@ -441,6 +445,12 @@ namespace NN
         public float momentum;
         public int epoch;
         public float errorThreshold;
+
+        /// <summary>
+        /// If there is only one output node, samples either
+        /// match the positive class label (1) or don't (0)
+        /// </summary>
+        public string positiveClass;
         public IActivationFunction activator;
 
         public int minibatchSize;
@@ -658,14 +668,24 @@ namespace NN
                         Node node = layer.nodes[i];
 
                         // Convert the classification to either 1 (output node is for the same class)
-                        // or 0 (output node is for a different class). 
-                        // I use [0.1, 0.9] to try to quicken optimization (LeCun, et al. 1998 "Efficient BackProp")
+                        // or 0 (output node is for a different class). If there's only one output node,
+                        // our actual is 1 iff the sample's classification matches positiveClass (0 otherwise)
+
+                        // We also use values [0.1, 0.9] to try to quicken optimization 
+                        // (LeCun, et al. 1998 "Efficient BackProp")
                         float actual = 0.1f; // -0.9f;
-                        if (sample.classification == classifications[i])
+                        if (layer.nodes.Length < 2)
+                        {
+                            if (sample.classification == positiveClass)
+                            {
+                                actual = 0.9f;
+                            }
+                        }
+                        else if (sample.classification == classifications[i])
                         {
                             actual = 0.9f;
                         }
-
+                        
                         // Reported overall error will be (1/2)*sum((actual - hypothesis)^2)
                         error += (float)Math.Pow(actual - node.output, 2);
 
@@ -799,7 +819,7 @@ namespace NN
         /// </summary>
         /// <param name="hypothesis"></param>
         /// <returns></returns>
-        private int GetPredictedClassIndex(float[] hypothesis)
+        private int GetPredictedClassIndex(float[] hypothesis, out float certainty)
         {
             int bestIndex = 0;
             for (int i = 0; i < hypothesis.Length; i++)
@@ -810,22 +830,95 @@ namespace NN
                 }
             }
 
+            certainty = hypothesis[bestIndex];
             return bestIndex;
         }
-        
+
+        /// <summary>
+        /// Display a Weka-style confusion matrix (and other statistics)
+        /// for a binary classification (1 output node)
+        /// </summary>
+        public void Test(Sample[] samples)
+        {
+            RecordClassifications(samples);
+
+            int n = 2;
+            float accuracy = 0;
+            var confusion = new float[n, n];
+
+            // Certainty of class per sample
+            var certainty = new float[samples.Length];
+            
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++)
+                {
+                    confusion[x, y] = 0;
+                }
+            }
+
+            // Console.WriteLine("Sample  Class Certainty");
+            for (int i = 0; i < samples.Length; i++)
+            {
+                var hypothesis = FeedForward(samples[i]);
+
+                // Note these are inverted (0 = positive class) just
+                // so that we can display the positive class first in the 
+                // confusion matrix
+                var predicted = Convert.ToInt32(hypothesis[0] < 0.5f);
+                var actual = Convert.ToInt32(samples[i].classification != positiveClass);
+                
+                if (predicted == actual)
+                {
+                    accuracy++;
+                }
+
+                confusion[predicted, actual]++;
+                certainty[i] = hypothesis[0];
+                
+                // Report certainty for this sample
+                // Console.WriteLine(
+                //     i.ToString().PadLeft(6) + "  " + 
+                //     certainty[i].ToString("0.0000").PadLeft(4)
+                // );
+            }
+
+            // Confusion matrix header of codes per class (weka-style)
+            int padding = samples.Length.ToString().Length + 1;
+            
+            Console.WriteLine("T".PadLeft(padding) + "F" .PadLeft(padding) + "  <-- classified as");
+
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++)
+                {
+                    Console.Write(confusion[x, y].ToString().PadLeft(padding));
+                }
+
+                // End of line class name
+                Console.WriteLine(" | " + (y == 0 ? "T" : "F"));
+            }
+
+            Console.WriteLine("Accuracy: " + (accuracy / samples.Length * 100.0f).ToString("0.0000") + "%");
+        }
+
         /// <summary>
         /// Run the given test samples through the previously trained NN
         /// and dumps a Weka-style confusion matrix and some statistical results
         /// </summary>
         /// <param name="samples"></param>
-        public void Test(Sample[] samples)
+        public void TestMulticlass(Sample[] samples)
         {
             RecordClassifications(samples);
+
             int n = classifications.Count;
             float accuracy = 0;
 
             // Confusion matrix of values
             var confusion = new float[n, n];
+
+            // Certainty of class per sample
+            var certainty = new float[samples.Length];
 
             for (int y = 0; y < n; y++)
             {
@@ -835,11 +928,12 @@ namespace NN
                 }
             }
 
-            foreach (var sample in samples)
+            // Console.WriteLine("Sample  Class Certainty");
+            for (int i = 0; i < samples.Length; i++)
             {
-                var hypothesis = FeedForward(sample);
-                var predicted = GetPredictedClassIndex(hypothesis);
-                var actual = classifications.FindIndex(x => x == sample.classification);
+                var hypothesis = FeedForward(samples[i]);
+                var predicted = GetPredictedClassIndex(hypothesis, out certainty[i]);
+                var actual = classifications.FindIndex(x => x == samples[i].classification);
 
                 if (predicted == actual)
                 {
@@ -847,8 +941,14 @@ namespace NN
                 }
 
                 confusion[predicted, actual]++;
-            }
 
+                // Report certainty for this sample
+                // Console.WriteLine(
+                //     i.ToString().PadLeft(6) + "  " + 
+                //     certainty[i].ToString("0.0000").PadLeft(4)
+                // );
+            }
+         
             // Confusion matrix header of codes per class (weka-style)
             string alpha = "abcdefghijklmnopqrstuvwxyz";
             int padding = samples.Length.ToString().Length + 1;
@@ -1064,10 +1164,11 @@ namespace NN
                 {
                     trainingRate = 0.3f,
                     momentum = 0.2f,
-                    epoch = 100,
+                    epoch = 1000,
                     errorThreshold = 0.001f,
-                    activator = new LogisticActivation(),
-                    minibatchSize = 3
+                    activator = new TanHActivation(),
+                    minibatchSize = 3,
+                    positiveClass = "Iris-setosa"
                 };
 
                 // var samples = network.GetEasierTrainingSamples();
@@ -1080,7 +1181,8 @@ namespace NN
                     network.StochasticGradientDescent
                 );
 
-                network.Test(samples);
+                // network.Test(samples);
+                network.TestMulticlass(samples);
             }
 
             WriteIterationGroup(network, error);
