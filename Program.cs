@@ -460,11 +460,11 @@ namespace NN
 
         private List<string> classifications;
 
-        public NeuralNetwork(int inputNodes, int outputNodes)
+        public NeuralNetwork(int inputNodes, int hiddenNodes = 0, int outputNodes = 1)
         {
             layers = new List<Layer>();
 
-            BuildNetwork(inputNodes, outputNodes);
+            BuildNetwork(inputNodes, hiddenNodes, outputNodes);
         }
 
         public void Print()
@@ -496,11 +496,24 @@ namespace NN
             }
         }
 
-        public void BuildNetwork(int inputNodes, int outputNodes)
+        public void BuildNetwork(int inputNodes, int hiddenNodes = 0, int outputNodes = 1)
         {
+            // Use Weka's 'a' setting if not specified
+            if (hiddenNodes < 1)
+            {
+                hiddenNodes = (inputNodes + outputNodes) / 2;
+            }
+
             var input = new Layer(inputNodes);
+            var hidden = new Layer(hiddenNodes);
             var output = new Layer(outputNodes);
-            var hidden = new Layer((inputNodes + outputNodes) / 2);
+
+            Console.WriteLine(
+                "Building network of " + 
+                input.nodes.Length + " inputs, " + 
+                hidden.nodes.Length + " hidden, and " + 
+                output.nodes.Length + " outputs"
+            );
 
             inputLayer = input;
 
@@ -1160,29 +1173,30 @@ namespace NN
             {
                 // Need to reinitialize network & samples, otherwise
                 // we have old network settings
-                network = new NeuralNetwork(4, 3)
+                network = new NeuralNetwork(597, 20, 1)
                 {
-                    trainingRate = 0.3f,
-                    momentum = 0.2f,
+                    trainingRate = 0.5f,
+                    momentum = 0, // 0.2f,
                     epoch = 1000,
                     errorThreshold = 0.001f,
                     activator = new TanHActivation(),
                     minibatchSize = 3,
-                    positiveClass = "Iris-setosa"
+                    positiveClass = "Baseline"
                 };
 
                 // var samples = network.GetEasierTrainingSamples();
                 // var samples = network.GetTrainingSamples();
                 // var samples = LoadSamplesFromCSV("iris-two-class-normalized.csv");
-                var samples = LoadSamplesFromCSV("iris-normalized-mean-zero.csv");
+                // var samples = LoadSamplesFromCSV("iris-normalized-mean-zero.csv");
+                var samples = LoadSamplesFromCSV("samples-various-0.01s.csv");
 
                 error[i] = network.Train(
                     samples, 
                     network.StochasticGradientDescent
                 );
 
-                // network.Test(samples);
-                network.TestMulticlass(samples);
+                network.Test(samples);
+                // network.TestMulticlass(samples);
             }
 
             WriteIterationGroup(network, error);
