@@ -999,6 +999,40 @@ namespace NN
 
     class Program
     {
+        /// <summary>
+        /// Apply normalization to the sample set, 
+        /// since I hate doing it in Excel by hand every time.
+        /// </summary>
+        /// <param name="samples"></param>
+        static void NormalizeSamples(Sample[] samples)
+        {
+            var n = samples[0].attr.Length;
+            var min = new float[n];
+            var max = new float[n];
+
+            // Grab range of each attribute
+            foreach (var sample in samples)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    min[i] = Math.Min(min[i], sample.attr[i]);
+                    max[i] = Math.Max(max[i], sample.attr[i]);
+                }
+            }
+
+            // Normalize each attribute to [-0.5, 0.5]
+            foreach (var sample in samples)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    if (max[i] != min[i])
+                    {
+                        sample.attr[i] = (sample.attr[i] - min[i]) / (max[i] - min[i]) - 0.5f;
+                    }
+                }
+            }
+        }
+
         static Sample[] LoadSamplesFromCSV(string filename)
         {
             List<Sample> samples = new List<Sample>();
