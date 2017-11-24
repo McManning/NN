@@ -336,13 +336,13 @@ namespace NN
         /// <summary>
         /// Weights between *previous* nodes and this node
         /// </summary>
-        public Dictionary<Node, float> weights;
+        public float[] weights;
 
         /// <summary>
         /// Tracking of weight deltas between previous nodes,
         /// used for factoring in momentum
         /// </summary>
-        public Dictionary<Node, float> previousWeightDelta;
+        public float[] previousWeightDelta;
         
         /// <summary>
         /// Weighted sum of previous node outputs + bias
@@ -371,68 +371,31 @@ namespace NN
         /// </summary>
         public float delta;
 
-        public Node()
+        /// <summary>
+        /// Create a new NN node
+        /// </summary>
+        /// <param name="prevNodes">Number of nodes in the previous layer</param>
+        public Node(int prevNodes)
         {
-            weights = new Dictionary<Node, float>();
-            previousWeightDelta = new Dictionary<Node, float>();
-
             bias = Utility.GaussianRandom();
             output = 0;
             delta = 0;
             input = 0;
-        }
 
-        /// <summary>
-        /// Add link to a node in the previous layer
-        /// </summary>
-        /// <param name="node"></param>
-        public void AddPrevious(Node node) {
-            weights[node] = Utility.GaussianRandom();
-            previousWeightDelta[node] = 0;
-        }
-
-        public string WeightsToString()
-        {
-            return string.Join(",", weights.Values);
-        }
-    }
-
-    class Layer
-    {
-        public Node[] nodes;
-
-        public int Count
-        {
-            get
+            if (prevNodes > 0)
             {
-                return nodes.Length;
-            }
-        }
+                weights = new float[prevNodes];
+                previousWeightDelta = new float[prevNodes];
 
-        public float[] Output
-        {
-            get
-            {
-                float[] output = new float[nodes.Length];
-                for (int i = 0; i < nodes.Length; i++)
+                for (int n = 0; n < prevNodes; n++)
                 {
-                    output[i] = nodes[i].output;
+                    weights[n] = Utility.GaussianRandom();
+                    previousWeightDelta[n] = 0;
                 }
-
-                return output;
-            }
-        }
-
-        public Layer(int nodeCount)
-        {
-            nodes = new Node[nodeCount];
-            for (int i = 0; i < nodeCount; i++)
-            {
-                nodes[i] = new Node();
             }
         }
     }
-
+    
     class Sample
     {
         public float[] attr;
@@ -455,47 +418,16 @@ namespace NN
 
         public int minibatchSize;
 
-        private List<Layer> layers;
-        private Layer inputLayer;
+        private Node[] inputLayer;
+        private Node[][] layers;
 
         private List<string> classifications;
 
         public NeuralNetwork(int inputNodes, int hiddenNodes = 0, int outputNodes = 1)
         {
-            layers = new List<Layer>();
-
             BuildNetwork(inputNodes, hiddenNodes, outputNodes);
         }
-
-        public void Print()
-        {
-            Console.WriteLine("==== Input Layer ====");
-
-            for (int n = 0; n < inputLayer.nodes.Length; n++)
-            {
-                Console.WriteLine("Node" + n +
-                    " <output=" + inputLayer.nodes[n].output +
-                    ", bias=" + inputLayer.nodes[n].bias +
-                    ">"
-                );
-            }
-
-            for (int i = 0; i < layers.Count; i++)
-            {
-                Console.WriteLine("==== Layer ".PadLeft(i * 10 + 10, ' ') + i + " ====");
-                
-                for (int n = 0; n < layers[i].nodes.Length; n++)
-                {
-                    Console.WriteLine("Node".PadLeft(i * 10 + 10, ' ') + n + 
-                        " <output=" + layers[i].nodes[n].output +
-                        ", bias=" + layers[i].nodes[n].bias +
-                        ", weights=" + layers[i].nodes[n].WeightsToString() + 
-                        ">"
-                    );
-                }
-            }
-        }
-
+        
         public void BuildNetwork(int inputNodes, int hiddenNodes = 0, int outputNodes = 1)
         {
             // Use Weka's 'a' setting if not specified
@@ -503,38 +435,27 @@ namespace NN
             {
                 hiddenNodes = (inputNodes + outputNodes) / 2;
             }
-
-            var input = new Layer(inputNodes);
-            var hidden = new Layer(hiddenNodes);
-            var output = new Layer(outputNodes);
-
-            Console.WriteLine(
-                "Building network of " + 
-                input.nodes.Length + " inputs, " + 
-                hidden.nodes.Length + " hidden, and " + 
-                output.nodes.Length + " outputs"
-            );
-
-            inputLayer = input;
-
-            layers.Add(hidden);
-            layers.Add(output);
-
-            // Add connections between nodes
-            foreach (var node in hidden.nodes)
+            
+            // Setup input layer
+            inputLayer = new Node[inputNodes];
+            for (int i = 0; i < inputNodes; i++)
             {
-                foreach (var prev in input.nodes)
-                {
-                    node.AddPrevious(prev);
-                }
+                inputLayer[i] = new Node(0);
+            }
+            
+            // Setup hidden layer(s) - just one for now
+            layers = new Node[2][];
+            layers[0] = new Node[hiddenNodes];
+            for (int i = 0; i < hiddenNodes; i++)
+            {
+                layers[0][i] = new Node(inputNodes);
             }
 
-            foreach (var node in output.nodes)
+            // Setup output layer
+            layers[1] = new Node[outputNodes];
+            for (int i = 0; i < outputNodes; i++)
             {
-                foreach (var prev in hidden.nodes)
-                {
-                    node.AddPrevious(prev);
-                }
+                layers[1][i] = new Node(hiddenNodes);
             }
         }
 
@@ -627,26 +548,26 @@ namespace NN
         /// <returns>hypthesis</returns>
         public float[] FeedForward(Sample sample)
         {
-            Layer previousLayer = inputLayer;
+            var previousLayer = inputLayer;
 
             // Feed sample as the input layer's outputs
-            for (int i = 0; i < sample.attr.Length; i++)
+            for (int i = 0; i < inputLayer.Length; i++)
             {
-                inputLayer.nodes[i].output = sample.attr[i];
+                inputLayer[i].output = sample.attr[i];
             }
             
             foreach (var layer in layers)
             {
-                foreach (var node in layer.nodes)
+                foreach (var node in layer)
                 {
                     // For all nodes in the previous layer
                     //      current node's input += edge weight * previous node's output
                     // Also include the bias as an additional special node,
                     // which has a static output but no edge weight
                     node.input = 0;
-                    foreach (var prev in node.weights)
+                    for (int j = 0; j < previousLayer.Length; j++)
                     {
-                        node.input += prev.Value * prev.Key.output; // + node.bias;
+                        node.input += node.weights[j] * previousLayer[j].output; // + node.bias;
                     }
                     
                     node.input += node.bias;
@@ -658,7 +579,21 @@ namespace NN
                 previousLayer = layer;
             }
 
-            return layers.Last().Output;
+            return GetOutput();
+        }
+
+        private float[] GetOutput()
+        {
+            var outputLayer = layers.Last();
+
+            float[] output = new float[outputLayer.Length];
+            
+            for (int i = 0; i < outputLayer.Length; i++)
+            {
+                output[i] = outputLayer[i].output;
+            }
+            
+            return output;
         }
 
         private float BackPropagate(Sample sample)
@@ -668,17 +603,20 @@ namespace NN
             float error = 0;
 
             // Back-propagate the error to update weights/biases
-            Layer forwardLayer = null;
-            foreach (var layer in layers.Reverse<Layer>())
+            Node[] forwardLayer = null;
+
+            for (int i = layers.Length - 1; i >= 0; i--)
             {
+                var layer = layers[i];
+
                 // If we're in the output layer, set the error delta 
                 // to the input hypothesis error term (typically hypothesis - actual)
                 if (forwardLayer == null)
                 {
                     // foreach (var node in layer.nodes)
-                    for (int i = 0; i < layer.nodes.Length; i++)
+                    for (int j = 0; j < layer.Length; j++)
                     {
-                        Node node = layer.nodes[i];
+                        Node node = layer[j];
 
                         // Convert the classification to either 1 (output node is for the same class)
                         // or 0 (output node is for a different class). If there's only one output node,
@@ -687,14 +625,14 @@ namespace NN
                         // We also use values [0.1, 0.9] to try to quicken optimization 
                         // (LeCun, et al. 1998 "Efficient BackProp")
                         float actual = 0.1f; // -0.9f;
-                        if (layer.nodes.Length < 2)
+                        if (layer.Length < 2)
                         {
                             if (sample.classification == positiveClass)
                             {
                                 actual = 0.9f;
                             }
                         }
-                        else if (sample.classification == classifications[i])
+                        else if (sample.classification == classifications[j])
                         {
                             actual = 0.9f;
                         }
@@ -711,12 +649,14 @@ namespace NN
                 {
                     // If we're in a hidden layer, aggregate the edge weight * delta of 
                     // every node connected to this node from the forward layer
-                    foreach (var node in layer.nodes)
+                    for (int j = 0; j < layer.Length; j++)
                     {
+                        var node = layer[j];
+
                         float sum = 0;
-                        foreach (var forwardNode in forwardLayer.nodes)
+                        foreach (var forwardNode in forwardLayer)
                         {
-                            sum += forwardNode.delta * activator.FPrime(node.input) * forwardNode.weights[node];
+                            sum += forwardNode.delta * activator.FPrime(node.input) * forwardNode.weights[j];
                         }
 
                         node.delta = sum;
@@ -727,21 +667,21 @@ namespace NN
             }
 
             // Update weights and biases based on backprop deltas
-            Layer prevLayer = inputLayer;
+            var prevLayer = inputLayer;
             foreach (var layer in layers)
             {
-                foreach (var node in layer.nodes)
+                foreach (var node in layer)
                 {
                     // Update weight between previous nodes and this node
-                    foreach (var prevNode in prevLayer.nodes)
+                    for (int j = 0; j < prevLayer.Length; j++)
                     {
-                        weightDelta = trainingRate * node.delta * prevNode.output;
+                        weightDelta = trainingRate * node.delta * prevLayer[j].output;
 
                         // Factor in momentum to the weight to reduce oscillation
-                        weightDelta += momentum * node.previousWeightDelta[prevNode];
-                        node.previousWeightDelta[prevNode] = weightDelta;
+                        weightDelta += momentum * node.previousWeightDelta[j];
+                        node.previousWeightDelta[j] = weightDelta;
 
-                        node.weights[prevNode] -= weightDelta;
+                        node.weights[j] -= weightDelta;
                     }
 
                     // Update bias for this node 
