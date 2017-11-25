@@ -1169,9 +1169,27 @@ namespace NN
             WriteIterationLog(network, errors);
         }
 
+        static void Vec3Test()
+        {
+            var network = new Vector3NeuralNetwork(100)
+            {
+                trainingRate = 1.0f,
+                momentum = 0.5f,
+                epoch = 500,
+                errorThreshold = 0.001f,
+                positiveClass = "Spiral"
+            };
+
+            var trainingSamples = Vector3NeuralNetwork.LoadSamplesFromCSV("vec3-train.csv");
+            var testSamples = Vector3NeuralNetwork.LoadSamplesFromCSV("vec3-test.csv");
+            
+            var errors = network.Train(trainingSamples);
+            network.Test(testSamples);
+        }
+
         static void Main(string[] args)
         {
-            RealDataTest();
+            Vec3Test();
 
             Console.ReadLine();
         }
