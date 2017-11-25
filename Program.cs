@@ -749,6 +749,7 @@ namespace NN
             {
                 error = optimizeFunc(samples);
                 errorList.Add(error);
+                Console.WriteLine("Iteration " + iteration + " Error: " + error);
             }
 
             if (iteration == epoch)
@@ -926,75 +927,6 @@ namespace NN
             Console.WriteLine("Accuracy: " + (accuracy / samples.Length * 100.0f).ToString("0.0000") + "%");
         }
         
-        /* public void FastNN(Sample[] samples)
-         {
-             Matrix<double> w1 = Matrix<double>.Build.Random(3, 3);
-             Matrix<double> w2 = Matrix<double>.Build.Random(3, 2);
-
-             // 10 iter
-             // 3 features
-             // 2 classes
-             for (int iter = 0; iter < 10; iter++)
-             {
-                 Console.WriteLine("Iteration " + iter);
-
-                 Utility.Shuffle(samples);
-
-                 // step, subset of 'minibatch' for bigger data
-                 grad = MinibatchGradient();
-
-                 // minibatch_grad
-                 List<Matrix<double>> xs = new List<Matrix<double>>();
-                 List<Matrix<double>> hs = new List<Matrix<double>>();
-                 List<Matrix<double>> errors = new List<Matrix<double>>();
-
-                 for (int i = 0; i < samples.Length; i++) {
-                     // Type copy
-                     var attr = new double[samples[i].attr.Length];
-                     for (int xx = 0; xx < attr.Length; xx++)
-                     {
-                         attr[xx] = samples[i].attr[xx];
-                     }
-
-                     var x = Vector<double>.Build.DenseOfArray(attr).ToColumnMatrix();
-
-                     // Forward prop
-                     var h = x * w1;
-
-                     // ReLU f(x) = max(0, x)
-                     h.Map(u => Math.Max(0, u));
-
-                     // Hidden layer to output
-                     var class_pred = Softmax(h * w2);
-
-                     // [0 0] matrix of 2 class problem
-                     // var y_true = Vector<double>.Build.Dense(2, 0).ToColumnMatrix();
-                     // There's some probability distribution stuff, basically it looks to
-                     // set anything with not the same class as 0, 1 o/w. We'll just use
-                     // the raw classes
-
-                     var classes = new double[2] { 0, 1 }; // TODO: Clearly not correct
-                     var class_true = Vector<double>.Build.DenseOfArray(classes).ToColumnMatrix();
-
-                     var error = class_true - class_pred;
-
-                     xs.Add(x);
-                     hs.Add(h);
-                     errors.Add(error);
-                 }
-
-                 // Backward prop
-                 var dw2 = hs.
-             }
-
-             // shuffle shite
-             // ... oh I wasn't shuffling... hmm.
-             Utility.Shuffle(samples);
-
-             // Backward prop
-
-         }*/
-
     }
 
     class Program
@@ -1070,16 +1002,24 @@ namespace NN
             return samples.ToArray();
         }
 
-        static void WriteIterationLog(float[] error, int iterations)
+        static void WriteIterationLog(NeuralNetwork network, float[] error)
         {
-            using (FileStream fs = File.Create(@"iterations-" + iterations + ".csv"))
+            using (FileStream fs = File.Create(@"iterations-error.csv"))
             {
                 using (StreamWriter writer = new StreamWriter(fs))
                 {
-                    writer.WriteLine("Iteration,MSE");
-                    for (int i = 0; i < iterations; i++)
+                    // Header 
+                    writer.WriteLine
+                        ("epoch=" + network.epoch +
+                        " threshold=" + network.errorThreshold +
+                        " rate=" + network.trainingRate +
+                        " momentum=" + network.momentum +
+                        " minibatch=" + network.minibatchSize
+                    );
+                    
+                    for (int i = 0; i < error.Length; i++)
                     {
-                        writer.WriteLine(i + "," + error[i]);
+                        writer.WriteLine(error[i]);
                     }
                 }
             }
@@ -1136,7 +1076,7 @@ namespace NN
             }
         }
         
-        static void Main(string[] args)
+        static void IrisBinaryTest()
         {
             int runs = 5;
 
@@ -1147,33 +1087,91 @@ namespace NN
             {
                 // Need to reinitialize network & samples, otherwise
                 // we have old network settings
-                network = new NeuralNetwork(597, 20, 1)
+                network = new NeuralNetwork(4, 0, 1)
                 {
-                    trainingRate = 0.5f,
-                    momentum = 0, // 0.2f,
+                    trainingRate = 0.3f,
+                    momentum = 0.2f,
                     epoch = 1000,
-                    errorThreshold = 0.001f,
-                    activator = new TanHActivation(),
-                    minibatchSize = 3,
-                    positiveClass = "Baseline"
+                    errorThreshold = 0.01f,
+                    activator = new TanHActivation()
                 };
 
                 // var samples = network.GetEasierTrainingSamples();
                 // var samples = network.GetTrainingSamples();
                 // var samples = LoadSamplesFromCSV("iris-two-class-normalized.csv");
-                // var samples = LoadSamplesFromCSV("iris-normalized-mean-zero.csv");
-                var samples = LoadSamplesFromCSV("samples-various-0.01s.csv");
+                var samples = LoadSamplesFromCSV("iris-normalized-mean-zero.csv");
 
                 error[i] = network.Train(
-                    samples, 
+                    samples,
                     network.StochasticGradientDescent
                 );
 
                 network.Test(samples);
-                // network.TestMulticlass(samples);
             }
 
             WriteIterationGroup(network, error);
+        }
+
+        static void IrisMulticlassTest()
+        {
+            int runs = 5;
+
+            float[][] error = new float[runs][];
+
+            NeuralNetwork network = null;
+            for (int i = 0; i < runs; i++)
+            {
+                network = new NeuralNetwork(4, 0, 3)
+                {
+                    trainingRate = 0.3f,
+                    momentum = 0.2f,
+                    epoch = 5000,
+                    errorThreshold = 0.01f,
+                    activator = new TanHActivation(),
+                    minibatchSize = 3,
+                    positiveClass = "Baseline"
+                };
+                
+                var samples = LoadSamplesFromCSV("iris-normalized-mean-zero.csv");
+
+                error[i] = network.Train(
+                    samples,
+                    network.StochasticGradientDescent
+                );
+                
+                network.TestMulticlass(samples);
+            }
+
+            WriteIterationGroup(network, error);
+        }
+
+        static void RealDataTest()
+        {
+            // 10 vec3 per sample, 300 nodes
+            // Limit: 199 vec3 (including 0)
+            var network = new NeuralNetwork(597, 0, 1)
+            {
+                trainingRate = 0.3f,
+                momentum = 0.2f,
+                epoch = 500,
+                errorThreshold = 0.01f,
+                activator = new LogisticActivation(),
+                positiveClass = "Baseline"
+            };
+
+            var samples = LoadSamplesFromCSV("samples-various-0.01s.csv");
+            NormalizeSamples(samples);
+
+            var errors = network.Train(samples, network.StochasticGradientDescent);
+
+            network.Test(samples);
+
+            WriteIterationLog(network, errors);
+        }
+
+        static void Main(string[] args)
+        {
+            RealDataTest();
 
             Console.ReadLine();
         }
