@@ -110,6 +110,21 @@ namespace NN
 
     /// <summary>
     /// I'm not creative in naming this.
+    /// 
+    /// This is a variation of the classic Neural Network that is tailored specifically
+    /// for operating on Vector3 position data and classifying Vec3 position lists.
+    /// 
+    /// In short:
+    ///     * Everything is treated internally as a Vec3 direction
+    ///         That means that when we are adjusting nodes during Backprop, 
+    ///         the node can be moved anywhere in full 3 dimensions
+    ///     * During FeedForward, input vec3 points are weighted in importance,
+    ///         along with some bias vec3 for each node.
+    ///         The output of FeedForward for a positive match ends up being > 1
+    ///         (this was discovered through trial and error)
+    ///     * During BackProp, the error is the square magnitude of the distance
+    ///         between the (single) output node and either Vec3.one for training
+    ///         a positive or Vec3.zero for training against a negative. 
     /// </summary>
     class Vector3NeuralNetwork
     {
@@ -247,6 +262,12 @@ namespace NN
             layers[1][0] = new Node(hiddenNodes);
         }
 
+        /// <summary>
+        /// Logistic sigmoid function for activation. 
+        /// Seems to be the most efficient (for now) for Vec3
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
         public Vector3 Activation(Vector3 input)
         {
             return new Vector3(
@@ -256,6 +277,11 @@ namespace NN
             );
         }
 
+        /// <summary>
+        /// Derivative of the logistic sigmoid function
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
         public Vector3 ActivationDerivative(Vector3 input)
         {
             var a = Activation(input);
@@ -267,8 +293,8 @@ namespace NN
         }
 
         /// <summary>
-        /// Returns the hypothesis [0, 1] that the sample matches the 
-        /// positive class after feeding it through the network
+        /// Returns the hypothesis Vec3. This vector has a square magnitude > 1.0 
+        /// for a predicted match against the positive class
         /// </summary>
         /// <param name="sample"></param>
         /// <returns>hypthesis</returns>
@@ -325,19 +351,13 @@ namespace NN
                     {
                         Node node = layer[j];
 
+                        // We want the final node to target vec3.one for a positive result.
+                        // This is basically a 3-dimensional convergence to 3 positive results
+                        // at once through the same network pass.
                         var actual = sample.classification == positiveClass 
                             ? Vector3.one 
                             : Vector3.zero;
-
-                        /*
-                         
-                        Error is the difference between the classification (0-1) and the output node's activation.
-                        But the activation is a vec3... node output should be a confidence of some sort...
-                        but that implies float output. So all other nodes have a float output...
-
-
-                        */
-
+                        
                         // Reported overall error will be (1/2)*sum((actual - hypothesis)^2)
                         error += (actual - node.output).sqrMagnitude;
 
@@ -492,8 +512,8 @@ namespace NN
 
                 // Note these are inverted (0 = positive class) just
                 // so that we can display the positive class first in the 
-                // confusion matrix
-                var predicted = Convert.ToInt32((Vector3.zero - hypothesis).sqrMagnitude < positiveThreshold * positiveThreshold);
+                // confusion matrix. In reality, hypothesis.sqrMagnitude should be > positiveThreshold^2 for a positive match
+                var predicted = Convert.ToInt32(hypothesis.sqrMagnitude < positiveThreshold * positiveThreshold);
                 var actual = Convert.ToInt32(samples[i].classification != positiveClass);
 
                 if (predicted == actual)
